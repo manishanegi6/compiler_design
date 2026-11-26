@@ -1,0 +1,139 @@
+from collections import defaultdict
+grammar = defaultdict(list)
+n = int(input("Enter number of productions: "))
+print("Enter productions (Example: E->TR):")
+for _ in range(n):
+    lhs, rhs = input().replace(" ", "").split("->")
+    for p in rhs.split("|"):
+        grammar[lhs].append(p)
+start = next(iter(grammar))
+NT = set(grammar.keys())
+EPS = '#'
+def symbols(s):
+    return list(s)
+def FIRST(x):
+    if x not in NT:
+        return {x}
+    result = set()
+    for p in grammar[x]:
+        if p == EPS:
+            result.add(EPS)
+            continue
+        nullable = True
+        for ch in symbols(p):
+            f = FIRST(ch)
+            result.update(f - {EPS})
+            if EPS not in f:
+                nullable = False
+                break
+        if nullable:
+            result.add(EPS)
+    return result
+FOLLOW = {x: set() for x in NT}
+FOLLOW[start].add('$')
+changed = True
+while changed:
+    changed = False
+    for lhs in grammar:
+        for p in grammar[lhs]:
+            for i, ch in enumerate(p):
+                if ch in NT:
+                    old = len(FOLLOW[ch])
+                    beta = p[i+1:]
+                    nullable = True
+                    for b in beta:
+                        f = FIRST(b)
+                        FOLLOW[ch].update(f - {EPS})
+                        if EPS not in f:
+                            nullable = False
+                            break
+                    if nullable:
+                        FOLLOW[ch].update(FOLLOW[lhs])
+                    if len(FOLLOW[ch]) != old:
+                        changed = True
+print("\nFIRST SETS")
+for x in grammar:
+    print("FIRST(", x, ") =", FIRST(x))
+print("\nFOLLOW SETS")
+for x in grammar:
+    print("FOLLOW(", x, ") =", FOLLOW[x])
+table = {x: {} for x in NT}
+conflict = False
+for lhs in grammar:
+    for p in grammar[lhs]:
+        if p == EPS:
+            f = {EPS}
+        else:
+            f = set()
+            nullable = True
+            for ch in p:
+                fs = FIRST(ch)
+                f.update(fs - {EPS})
+                if EPS not in fs:
+                    nullable = False
+                    break
+            if nullable:
+                f.add(EPS)
+        for t in f - {EPS}:
+            if t in table[lhs] and table[lhs][t] != p:
+                conflict = True
+            table[lhs][t] = p
+        if EPS in f:
+            for t in FOLLOW[lhs]:
+                if t in table[lhs] and table[lhs][t] != p:
+                    conflict = True
+                table[lhs][t] = p
+terminals = sorted(
+    {t for row in table.values() for t in row}
+    | {'$'}
+)
+print("\nLL(1) PARSING TABLE")
+print("NT".ljust(10), end="")
+for t in terminals:
+    print(t.center(12), end="")
+print()
+print("-" * (10 + 12 * len(terminals)))
+for nt in grammar:
+    print(nt.ljust(10), end="")
+    for t in terminals:
+        value = table[nt].get(t, "-")
+        entry = nt + "->" + value if value != "-" else "-"
+        print(entry.center(12), end="")
+    print()
+if conflict:
+    print("\nGrammar is NOT LL(1) (table conflict).")
+else:
+    print("\nGrammar is LL(1).")
+if not conflict:
+    inp = input("\nEnter input string: ") + '$'
+    stack = ['$', start]
+    i = 0
+    print("\nSTACK\t\tINPUT\t\tACTION")
+    while stack:
+        top = stack[-1]
+        current = inp[i]
+        print(''.join(stack), "\t\t", inp[i:], end="\t\t")
+        if top == '$' and current == '$':
+            stack.pop()
+            print("ACCEPT")
+            break
+        if top not in NT:
+            if top == current:
+                stack.pop()
+                i += 1
+                print("Match", current)
+            else:
+                print("REJECT")
+                break
+        else:
+            prod = table[top].get(current)
+            if prod is None:
+                print("REJECT")
+                break
+            stack.pop()
+            if prod != EPS:
+                for ch in reversed(prod):
+                    stack.append(ch)
+            print(top, "->", prod)
+    else:
+        print("REJECT")
