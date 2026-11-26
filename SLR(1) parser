@@ -1,0 +1,193 @@
+from collections import defaultdict
+grammar = defaultdict(list)
+n = int(input("Enter number of productions: "))
+print("Enter productions (Example: S->CC):")
+for _ in range(n):
+    lhs, rhs = input().replace(" ", "").split("->")
+    for p in rhs.split("|"):
+        grammar[lhs].append(p)
+start = next(iter(grammar))
+aug = start + "'"
+while aug in grammar:
+    aug += "'"
+grammar[aug] = [start]
+NT = set(grammar.keys())
+EPS = '#'
+END = '$'
+def FIRST(x):
+    if x not in NT:
+        return {x}
+    result = set()
+    for p in grammar[x]:
+        if p == EPS:
+            result.add(EPS)
+        else:
+            nullable = True
+            for ch in p:
+                f = FIRST(ch)
+                result.update(f - {EPS})
+                if EPS not in f:
+                    nullable = False
+                    break
+            if nullable:
+                result.add(EPS)
+    return result
+FOLLOW = {x: set() for x in NT}
+FOLLOW[start].add(END)
+changed = True
+while changed:
+    changed = False
+    for lhs in grammar:
+        for p in grammar[lhs]:
+            if p == EPS:
+                continue
+            for i, ch in enumerate(p):
+                if ch in NT:
+                    old = len(FOLLOW[ch])
+                    beta = p[i+1:]
+                    nullable = True
+                    for b in beta:
+                        f = FIRST(b)
+                        FOLLOW[ch].update(f - {EPS})
+                        if EPS not in f:
+                            nullable = False
+                            break
+                    if nullable:
+                        FOLLOW[ch].update(FOLLOW[lhs])
+                    if len(FOLLOW[ch]) != old:
+                        changed = True
+print("\nFIRST SETS")
+for x in grammar:
+    print("FIRST(", x, ") =", FIRST(x))
+print("\nFOLLOW SETS")
+for x in grammar:
+    print("FOLLOW(", x, ") =", FOLLOW[x])
+productions = []
+for lhs in grammar:
+    for rhs in grammar[lhs]:
+        productions.append((lhs, rhs))
+def closure(items):
+    items = set(items)
+    changed = True
+    while changed:
+        changed = False
+        for lhs, rhs, dot in list(items):
+            if dot < len(rhs):
+                ch = rhs[dot]
+                if ch in NT:
+                    for p in grammar[ch]:
+                        item = (ch, p, 0)
+                        if item not in items:
+                            items.add(item)
+                            changed = True
+    return frozenset(items)
+def goto(items, X):
+    new_items = set()
+    for lhs, rhs, dot in items:
+        if dot < len(rhs) and rhs[dot] == X:
+            new_items.add((lhs, rhs, dot+1))
+    return closure(new_items) if new_items else frozenset()
+C = [closure({(aug, start, 0)})]
+transitions = {}
+i = 0
+while i < len(C):
+    I = C[i]
+    symbols = set()
+    for lhs, rhs, dot in I:
+        if dot < len(rhs):
+            symbols.add(rhs[dot])
+    for X in sorted(symbols):
+        J = goto(I, X)
+        if J not in C:
+            C.append(J)
+        transitions[(i, X)] = C.index(J)
+    i += 1
+print("\nCANONICAL LR(0) ITEM SETS")
+for i, I in enumerate(C):
+    print(f"\nI{i}:")
+    for lhs, rhs, dot in sorted(I):
+        r = rhs[:dot] + "." + rhs[dot:]
+        print(f"{lhs} -> {r}")
+terminals = set()
+for lhs, rhs in productions:
+    for ch in rhs:
+        if ch not in NT and ch != EPS:
+            terminals.add(ch)
+terminals.add(END)
+non_terminals = NT - {aug}
+ACTION = defaultdict(dict)
+GOTO = defaultdict(dict)
+conflict = False
+def add_action(state, symbol, value):
+    global conflict
+    if symbol in ACTION[state] and ACTION[state][symbol] != value:
+        conflict = True
+        print("Conflict:", state, symbol,
+              ACTION[state][symbol], value)
+    else:
+        ACTION[state][symbol] = value
+for i, I in enumerate(C):
+    for lhs, rhs, dot in I:
+        if dot < len(rhs):
+            X = rhs[dot]
+            j = transitions[(i, X)]
+            if X in terminals:
+                add_action(i, X, "s" + str(j))
+            else:
+                GOTO[i][X] = j
+        else:
+            if lhs == aug:
+                add_action(i, END, 'acc')
+            else:
+                pno = productions.index((lhs, rhs)) + 1
+                for t in FOLLOW[lhs]:
+                    add_action(i, t, "r" + str(pno))
+columns = sorted(terminals - {END}) + [END] + sorted(non_terminals)
+print("\nSLR(1) PARSING TABLE")
+print("State".ljust(8), end="")
+for c in columns:
+    print(c.center(10), end="")
+print()
+print("-" * (8 + 10 * len(columns)))
+for i in range(len(C)):
+    print(str(i).ljust(8), end="")
+    for c in columns:
+        if c in terminals:
+            value = ACTION[i].get(c, "-")
+        else:
+            value = GOTO[i].get(c, "-")
+        print(str(value).center(10), end="")
+    print()
+if conflict:
+    print("\nGrammar is NOT SLR(1).")
+else:
+    print("\nGrammar is SLR(1).")
+    inp = input("\nEnter input string: ") + END
+    stack = [0]
+    i = 0
+    print("\nSTACK\t\tINPUT\t\tACTION")
+    while True:
+        state = stack[-1]
+        current = inp[i]
+        action = ACTION[state].get(current)
+        print(stack, "\t\t", inp[i:], "\t\t", action)
+        if action is None:
+            print("\nString Rejected!")
+            break
+        if action == 'acc':
+            print("\nString Accepted!")
+            break
+        elif action[0] == 's':
+            stack.append(current)
+            stack.append(int(action[1:]))
+            i += 1
+        elif action[0] == 'r':
+            pno = int(action[1:])
+            lhs, rhs = productions[pno - 1]
+            length = 0 if rhs == EPS else len(rhs)
+            if length:
+                del stack[-2 * length:]
+            state = stack[-1]
+            stack.append(lhs)
+            stack.append(GOTO[state][lhs])
+            print("Reduce:", lhs, "->", rhs)
