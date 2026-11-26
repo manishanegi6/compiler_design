@@ -1,0 +1,69 @@
+grammar = {}
+n = int(input("Enter number of productions: "))
+print("Enter productions (e.g. E=TR):")
+for i in range(n):
+    left, right = input().replace(" ", "").split("=")
+    grammar[left] = right.split("|")
+first = {}
+follow = {}
+def FIRST(symbol):
+    if symbol not in grammar:
+        return {symbol}
+    if symbol in first:
+        return first[symbol]
+    result = set()
+    for production in grammar[symbol]:
+        if production == '#':
+            result.add('#')
+            continue
+        for char in production:
+            temp = FIRST(char)
+            result.update(temp - {'#'})
+            if '#' not in temp:
+                break
+        else:
+            result.add('#')
+    first[symbol] = result
+    return result
+def FOLLOW(symbol):
+    if symbol in follow:
+        return follow[symbol]
+    result = follow[symbol]
+    for lhs in grammar:
+        for production in grammar[lhs]:
+            for i in range(len(production)):
+                if production[i] == symbol:
+                    beta = production[i+1:]
+                    if beta:
+                        temp = set()
+                        nullable = True
+                        for char in beta:
+                            f = FIRST(char)
+                            temp.update(f - {'#'})
+                            if '#' not in f:
+                                nullable = False
+                                break
+                        result.update(temp)
+                        if nullable and lhs != symbol:
+                            result.update(FOLLOW(lhs))
+                    elif lhs != symbol:
+                        result.update(FOLLOW(lhs))
+    return result
+for non_terminal in grammar:
+    FIRST(non_terminal)
+for non_terminal in grammar:
+    follow[non_terminal] = set()
+start_symbol = list(grammar.keys())[0]
+follow[start_symbol].add('$')
+changed = True
+while changed:
+    old = {k: set(v) for k, v in follow.items()}
+    for non_terminal in grammar:
+        FOLLOW(non_terminal)
+    changed = old != follow
+print("\nFIRST Sets:")
+for nt in grammar:
+    print("FIRST(" + nt + ") =", first[nt])
+print("\nFOLLOW Sets:")
+for nt in grammar:
+    print("FOLLOW(" + nt + ") =", follow[nt])
