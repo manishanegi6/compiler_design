@@ -1,0 +1,189 @@
+from collections import defaultdict
+grammar = defaultdict(list)
+n = int(input("Enter number of productions: "))
+print("Enter productions (Example: S->CC):")
+for _ in range(n):
+    lhs, rhs = input().replace(" ", "").split("->")
+    for p in rhs.split("|"):
+        grammar[lhs].append(p)
+start = next(iter(grammar))
+aug = start + "'"
+while aug in grammar:
+    aug += "'"
+grammar[aug] = [start]
+NT = set(grammar.keys())
+EPS = '#'
+END = '$'
+def first_nt(nt):
+    result = set()
+    for p in grammar[nt]:
+        if p == EPS:
+            result.add(EPS)
+        else:
+            result.update(FIRST(p))
+    return result
+def FIRST(seq):
+    result = set()
+    if not seq:
+        return {EPS}
+    for ch in seq:
+        if ch not in NT:
+            f = {ch}
+        else:
+            f = first_nt(ch)
+        result.update(f - {EPS})
+        if EPS not in f:
+            break
+    else:
+        result.add(EPS)
+    return result
+productions = []
+for lhs in grammar:
+    for rhs in grammar[lhs]:
+        productions.append((lhs, rhs))
+def closure(items):
+    items = set(items)
+    changed = True
+    while changed:
+        changed = False
+        for lhs, rhs, dot, look in list(items):
+            if dot < len(rhs):
+                B = rhs[dot]
+                if B in NT:
+                    beta = rhs[dot+1:] + look
+                    lookaheads = FIRST(beta) - {EPS}
+                    for p in grammar[B]:
+                        for b in lookaheads:
+                            item = (B, p, 0, b)
+                            if item not in items:
+                                items.add(item)
+                                changed = True
+    return frozenset(items)
+def goto(items, X):
+    new_items = set()
+    for lhs, rhs, dot, look in items:
+        if dot < len(rhs) and rhs[dot] == X:
+            new_items.add((lhs, rhs, dot+1, look))
+    return closure(new_items) if new_items else frozenset()
+C = [closure({(aug, start, 0, END)})]
+transitions = {}
+i = 0
+while i < len(C):
+    I = C[i]
+    symbols = set()
+    for lhs, rhs, dot, look in I:
+        if dot < len(rhs):
+            symbols.add(rhs[dot])
+    for X in sorted(symbols):
+        J = goto(I, X)
+        if J not in C:
+            C.append(J)
+        transitions[(i, X)] = C.index(J)
+    i += 1
+core_map = {}
+merged = []
+state_group = {}
+for i, I in enumerate(C):
+    core = frozenset(
+        (lhs, rhs, dot)
+        for lhs, rhs, dot, look in I
+    )
+    if core not in core_map:
+        core_map[core] = len(merged)
+        merged.append(set())
+    group = core_map[core]
+    state_group[i] = group
+    merged[group].update(I)
+new_transitions = {}
+for (i, X), j in transitions.items():
+    a = state_group[i]
+    b = state_group[j]
+    new_transitions[(a, X)] = b
+print("\nLALR(1) ITEM SETS")
+for i, I in enumerate(merged):
+    print(f"\nI{i}:")
+    for lhs, rhs, dot, look in sorted(I):
+        r = rhs[:dot] + "." + rhs[dot:]
+        print(f"{lhs} -> {r}, {look}")
+terminals = set()
+for lhs, rhs in productions:
+    for ch in rhs:
+        if ch not in NT and ch != EPS:
+            terminals.add(ch)
+terminals.add(END)
+non_terminals = NT - {aug}
+ACTION = defaultdict(dict)
+GOTO = defaultdict(dict)
+conflict = False
+def add_action(state, symbol, value):
+    global conflict
+    if symbol in ACTION[state] and ACTION[state][symbol] != value:
+        conflict = True
+        print("Conflict:", state, symbol,
+              ACTION[state][symbol], value)
+    else:
+        ACTION[state][symbol] = value
+for i, I in enumerate(merged):
+    for lhs, rhs, dot, look in I:
+        if dot < len(rhs):
+            X = rhs[dot]
+            j = new_transitions[(i, X)]
+            if X in terminals:
+                add_action(i, X, "s" + str(j))
+            else:
+                GOTO[i][X] = j
+        else:
+            if lhs == aug:
+                add_action(i, END, "acc")
+            else:
+                pno = productions.index((lhs, rhs)) + 1
+                add_action(i, look, "r" + str(pno))
+columns = sorted(terminals - {END}) + [END] + sorted(non_terminals)
+print("\nLALR(1) PARSING TABLE")
+print("State".ljust(8), end="")
+for c in columns:
+    print(c.center(10), end="")
+print()
+print("-" * (8 + 10 * len(columns)))
+for i in range(len(merged)):
+    print(str(i).ljust(8), end="")
+    for c in columns:
+        if c in terminals:
+            value = ACTION[i].get(c, "-")
+        else:
+            value = GOTO[i].get(c, "-")
+        print(str(value).center(10), end="")
+    print()
+if conflict:
+    print("\nGrammar is NOT LALR(1).")
+else:
+    print("\nGrammar is LALR(1).")
+    inp = input("\nEnter input string: ") + END
+    stack = [0]
+    i = 0
+    print("\nSTACK\t\tINPUT\t\tACTION")
+    while True:
+        state = stack[-1]
+        current = inp[i]
+        action = ACTION[state].get(current)
+        print(stack, "\t\t", inp[i:], "\t\t", action)
+        if action is None:
+            print("\nString Rejected!")
+            break
+        if action == 'acc':
+            print("\nString Accepted!")
+            break
+        elif action[0] == 's':
+            stack.append(current)
+            stack.append(int(action[1:]))
+            i += 1
+        elif action[0] == 'r':
+            pno = int(action[1:])
+            lhs, rhs = productions[pno - 1]
+            length = 0 if rhs == EPS else len(rhs)
+            if length:
+                del stack[-2 * length:]
+            state = stack[-1]
+            stack.append(lhs)
+            stack.append(new_transitions[(state, lhs)])
+            print("Reduce:", lhs, "->", rhs)
